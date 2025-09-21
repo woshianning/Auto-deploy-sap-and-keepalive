@@ -2,7 +2,7 @@ name: 自动保活 SAP
 
 on:
   schedule:
-    - cron: '17 00 * * *'     
+    - cron: '17 00 * * *'      
   workflow_dispatch:          # 允许手动触发
 
 jobs:
@@ -60,20 +60,28 @@ jobs:
         echo "SELECTED_ORG=$SELECTED_ORG" >> $GITHUB_ENV
         echo "SELECTED_SPACE=$SELECTED_SPACE" >> $GITHUB_ENV
 
-    - name: '[仅定时任务] 等待到 UTC+8 08:17'
+    - name: '[仅定时任务] 等待 ntp.org 时间到达 00:20 UTC'
       if: github.event_name == 'schedule'
       run: |
-        sudo apt-get update && sudo apt-get install -y jq
-        echo "定时任务触发，等待 UTC+8 时间到达 08:17..."
+        echo "定时任务触发，等待 ntp.org 的 UTC 时间到达 00:20..."
+        target_time="00:20"
         while true; do
-          current_time=$(curl -s http://worldtimeapi.org/api/timezone/Asia/Shanghai | jq -r '.datetime' | cut -c 12-16)
-          echo "当前 UTC+8 时间: $current_time"
-          if [[ "$current_time" == "08:17" ]]; then
-            echo "时间到达 08:17，开始执行重启任务。"
+          # 从 ntp.org 的 HTTP 头获取 GMT/UTC 时间 (例如: date: Sun, 22 Sep 2025 00:19:30 GMT -> 提取 00:19)
+          current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
+          
+          if [ -z "$current_time" ]; then
+            echo "错误：无法从 ntp.org 获取时间，10秒后重试..."
+            sleep 10
+            continue
+          fi
+
+          echo "当前 ntp.org UTC 时间: $current_time"
+          if [[ "$current_time" == "$target_time" ]]; then
+            echo "时间到达 00:20 UTC (北京时间 08:20)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，30秒后重试..."
-          sleep 30
+          echo "时间未到，10秒后重试..."
+          sleep 10
         done
 
     - name: 获取所有应用
@@ -181,20 +189,28 @@ jobs:
         echo "SELECTED_ORG=$SELECTED_ORG" >> $GITHUB_ENV
         echo "SELECTED_SPACE=$SELECTED_SPACE" >> $GITHUB_ENV
 
-    - name: '[仅定时任务] 等待到 UTC+8 08:20'
+    - name: '[仅定时任务] 等待 ntp.org 时间到达 00:20 UTC'
       if: github.event_name == 'schedule'
       run: |
-        sudo apt-get update && sudo apt-get install -y jq
-        echo "定时任务触发，等待 UTC+8 时间到达 08:17..."
+        echo "定时任务触发，等待 ntp.org 的 UTC 时间到达 00:20..."
+        target_time="00:20"
         while true; do
-          current_time=$(curl -s http://worldtimeapi.org/api/timezone/Asia/Shanghai | jq -r '.datetime' | cut -c 12-16)
-          echo "当前 UTC+8 时间: $current_time"
-          if [[ "$current_time" == "08:20" ]]; then
-            echo "时间到达 08:20，开始执行重启任务。"
+          # 从 ntp.org 的 HTTP 头获取 GMT/UTC 时间 (例如: date: Sun, 22 Sep 2025 00:19:30 GMT -> 提取 00:19)
+          current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
+          
+          if [ -z "$current_time" ]; then
+            echo "错误：无法从 ntp.org 获取时间，10秒后重试..."
+            sleep 10
+            continue
+          fi
+
+          echo "当前 ntp.org UTC 时间: $current_time"
+          if [[ "$current_time" == "$target_time" ]]; then
+            echo "时间到达 00:20 UTC (北京时间 08:20)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，30秒后重试..."
-          sleep 30
+          echo "时间未到，10秒后重试..."
+          sleep 10
         done
 
     - name: 获取所有应用
