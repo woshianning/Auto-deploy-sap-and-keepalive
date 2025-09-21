@@ -2,7 +2,7 @@ name: 自动保活 SAP
 
 on:
   schedule:
-    - cron: '15 00 * * *'      #提前5分钟启动
+    - cron: '55 23 * * *'      # UTC时间 23:55 启动，以确保在 00:00 前 runner 就绪
   workflow_dispatch:          # 允许手动触发
 
 jobs:
@@ -31,108 +31,81 @@ jobs:
     - name: 登录并自动检测组织和空间
       run: |
         cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
-        
         echo "自动检测SG区域可用的组织和空间..."
-        
         SELECTED_ORG=$(cf orgs | grep -v "^name$" | grep -v "^Getting orgs" | grep -v "^$" | head -n 1 | awk '{print $1}')
-        
-        if [ -z "$SELECTED_ORG" ]; then
-          echo "错误: 未找到可用的组织"
-          exit 1
-        fi
-        
-        echo "选择组织: $SELECTED_ORG"
+        if [ -z "$SELECTED_ORG" ]; then echo "错误: 未找到可用的组织"; exit 1; fi
         cf target -o "$SELECTED_ORG"
-        
         SELECTED_SPACE=$(cf spaces | grep -v "^name$" | grep -v "^Getting spaces" | grep -v "^$" | head -n 1 | awk '{print $1}')
-        
-        if [ -z "$SELECTED_SPACE" ]; then
-          echo "错误: 未找到可用的空间"
-          exit 1
-        fi
-        
-        echo "选择空间: $SELECTED_SPACE"
+        if [ -z "$SELECTED_SPACE" ]; then echo "错误: 未找到可用的空间"; exit 1; fi
         cf target -s "$SELECTED_SPACE"
-        
         echo "当前SG区域目标:"
         cf target
-        
-        echo "SELECTED_ORG=$SELECTED_ORG" >> $GITHUB_ENV
-        echo "SELECTED_SPACE=$SELECTED_SPACE" >> $GITHUB_ENV
 
-    - name: '[仅定时任务] 等待 ntp.org 时间到达 00:20 UTC'
+    - name: '[仅定时任务] 等待 UTC 00:00 开始任务'
       if: github.event_name == 'schedule'
       run: |
-        echo "定时任务触发，等待 ntp.org 的 UTC 时间到达 00:20..."
-        target_time="00:20"
+        echo "等待 UTC 时间到达 00:00 以开始重启流程..."
+        target_time="00:00"
         while true; do
-          # 从 ntp.org 的 HTTP 头获取 GMT/UTC 时间 (例如: date: Sun, 22 Sep 2025 00:19:30 GMT -> 提取 00:19)
           current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
-          
-          if [ -z "$current_time" ]; then
-            echo "错误：无法从 ntp.org 获取时间，10秒后重试..."
-            sleep 10
-            continue
-          fi
-
-          echo "当前 ntp.org UTC 时间: $current_time"
-          if [[ "$current_time" == "$target_time" ]]; then
-            echo "时间到达 00:20 UTC (北京时间 08:20)，开始执行重启任务。"
+          if [ -z "$current_time" ]; then sleep 15; continue; fi
+          if [[ "$current_time" > "01:00" ]]; then echo "错误：已超过安全时间窗口。"; exit 1; fi
+          if [[ "$current_time" > "$target_time" || "$current_time" == "$target_time" ]]; then
+            echo "时间到达或超过 00:00 UTC (北京时间 08:00)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，10秒后重试..."
-          sleep 10
+          echo "时间未到，将在 1 分钟后再次检查..."
+          sleep 60
         done
 
-    - name: 获取所有应用
-      id: get-sg-apps
+    - name: 尝试重启所有应用(直至成功)
       run: |
-        echo "扫描SG区域中的所有应用..."
         apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
-        echo "发现的应用:"
-        echo "$apps"
-        if [ -n "$apps" ]; then
-          app_count=$(echo "$apps" | wc -l)
-          echo "SG区域总共发现 $app_count 个应用"
-        else
-          echo "SG区域未发现任何应用"
-        fi
-        echo "apps<<EOF" >> $GITHUB_OUTPUT
-        echo "$apps" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: 重启所有应用
-      run: |
-        apps="${{ steps.get-sg-apps.outputs.apps }}"
         if [ -z "$apps" ]; then
-          echo "在SG区域中未找到任何应用，跳过重启操作"
+          echo "在SG区域中未发现任何应用，无需操作。"
           exit 0
         fi
         
-        echo "开始重启SG区域中的应用:"
-        success_count=0
-        failure_count=0
+        echo "发现应用列表:"
+        echo "$apps"
         
+        overall_success=true
         for app in $apps; do
-          echo "正在重启应用: $app"
-          if cf restart "$app"; then
-            echo "应用 $app 重启成功"
-            success_count=$((success_count + 1))
-          else
-            echo "应用 $app 重启失败"
-            failure_count=$((failure_count + 1))
+          max_attempts=3
+          attempt=1
+          success=false
+          while [[ $attempt -le $max_attempts ]]; do
+            echo "----------------------------------------"
+            echo "正在尝试重启应用: $app (第 $attempt / $max_attempts 次)"
+            if cf restart "$app"; then
+              echo "应用 $app 重启成功。"
+              success=true
+              break
+            else
+              echo "应用 $app 重启失败。将在 1 分钟后重试..."
+              sleep 60
+            fi
+            ((attempt++))
+          done
+          
+          if [[ "$success" == "false" ]]; then
+            echo "应用 $app 在 $max_attempts 次尝试后仍重启失败。"
+            overall_success=false
           fi
-          echo "----------------------------------------"
-          sleep 15
         done
-        
-        echo "SG区域重启操作完成"
-        echo "成功重启: $success_count 个应用"
-        echo "重启失败: $failure_count 个应用"
 
-    - name: 验证应用状态
+        if [[ "$overall_success" == "false" ]]; then
+          echo "----------------------------------------"
+          echo "警告: SG区域部分应用重启失败。"
+          exit 1
+        else
+          echo "----------------------------------------"
+          echo "成功: SG区域所有应用均已成功触发重启。"
+        fi
+
+    - name: 验证最终应用状态
       run: |
-        echo "验证SG区域应用状态..."
+        echo "验证SG区域最终应用状态..."
         cf apps
 
   restart-us-apps:
@@ -160,106 +133,79 @@ jobs:
     - name: 登录并自动检测组织和空间
       run: |
         cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
-        
         echo "自动检测US区域可用的组织和空间..."
-        
         SELECTED_ORG=$(cf orgs | grep -v "^name$" | grep -v "^Getting orgs" | grep -v "^$" | head -n 1 | awk '{print $1}')
-        
-        if [ -z "$SELECTED_ORG" ]; then
-          echo "错误: 未找到可用的组织"
-          exit 1
-        fi
-        
-        echo "选择组织: $SELECTED_ORG"
+        if [ -z "$SELECTED_ORG" ]; then echo "错误: 未找到可用的组织"; exit 1; fi
         cf target -o "$SELECTED_ORG"
-        
         SELECTED_SPACE=$(cf spaces | grep -v "^name$" | grep -v "^Getting spaces" | grep -v "^$" | head -n 1 | awk '{print $1}')
-        
-        if [ -z "$SELECTED_SPACE" ]; then
-          echo "错误: 未找到可用的空间"
-          exit 1
-        fi
-        
-        echo "选择空间: $SELECTED_SPACE"
+        if [ -z "$SELECTED_SPACE" ]; then echo "错误: 未找到可用的空间"; exit 1; fi
         cf target -s "$SELECTED_SPACE"
-        
         echo "当前US区域目标:"
         cf target
-        
-        echo "SELECTED_ORG=$SELECTED_ORG" >> $GITHUB_ENV
-        echo "SELECTED_SPACE=$SELECTED_SPACE" >> $GITHUB_ENV
 
-    - name: '[仅定时任务] 等待 ntp.org 时间到达 00:20 UTC'
+    - name: '[仅定时任务] 等待 UTC 00:00 开始任务'
       if: github.event_name == 'schedule'
       run: |
-        echo "定时任务触发，等待 ntp.org 的 UTC 时间到达 00:20..."
-        target_time="00:20"
+        echo "等待 UTC 时间到达 00:00 以开始重启流程..."
+        target_time="00:00"
         while true; do
-          # 从 ntp.org 的 HTTP 头获取 GMT/UTC 时间 (例如: date: Sun, 22 Sep 2025 00:19:30 GMT -> 提取 00:19)
           current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
-          
-          if [ -z "$current_time" ]; then
-            echo "错误：无法从 ntp.org 获取时间，10秒后重试..."
-            sleep 10
-            continue
-          fi
-
-          echo "当前 ntp.org UTC 时间: $current_time"
-          if [[ "$current_time" == "$target_time" ]]; then
-            echo "时间到达 00:20 UTC (北京时间 08:20)，开始执行重启任务。"
+          if [ -z "$current_time" ]; then sleep 15; continue; fi
+          if [[ "$current_time" > "01:00" ]]; then echo "错误：已超过安全时间窗口。"; exit 1; fi
+          if [[ "$current_time" > "$target_time" || "$current_time" == "$target_time" ]]; then
+            echo "时间到达或超过 00:00 UTC (北京时间 08:00)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，10秒后重试..."
-          sleep 10
+          echo "时间未到，将在 1 分钟后再次检查..."
+          sleep 60
         done
 
-    - name: 获取所有应用
-      id: get-us-apps
+    - name: 尝试重启所有应用(直至成功)
       run: |
-        echo "扫描US区域中的所有应用..."
         apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
-        echo "发现的应用:"
-        echo "$apps"
-        if [ -n "$apps" ]; then
-          app_count=$(echo "$apps" | wc -l)
-          echo "US区域总共发现 $app_count 个应用"
-        else
-          echo "US区域未发现任何应用"
-        fi
-        echo "apps<<EOF" >> $GITHUB_OUTPUT
-        echo "$apps" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: 重启所有应用
-      run: |
-        apps="${{ steps.get-us-apps.outputs.apps }}"
         if [ -z "$apps" ]; then
-          echo "在US区域中未找到任何应用，跳过重启操作"
+          echo "在US区域中未发现任何应用，无需操作。"
           exit 0
         fi
-        
-        echo "开始重启US区域中的应用:"
-        success_count=0
-        failure_count=0
-        
-        for app in $apps; do
-          echo "正在重启应用: $app"
-          if cf restart "$app"; then
-            echo "应用 $app 重启成功"
-            success_count=$((success_count + 1))
-          else
-            echo "应用 $app 重启失败"
-            failure_count=$((failure_count + 1))
-          fi
-          echo "----------------------------------------"
-          sleep 15
-        done
-        
-        echo "US区域重启操作完成"
-        echo "成功重启: $success_count 个应用"
-        echo "重启失败: $failure_count 个应用"
 
-    - name: 验证应用状态
+        echo "发现应用列表:"
+        echo "$apps"
+
+        overall_success=true
+        for app in $apps; do
+          max_attempts=3
+          attempt=1
+          success=false
+          while [[ $attempt -le $max_attempts ]]; do
+            echo "----------------------------------------"
+            echo "正在尝试重启应用: $app (第 $attempt / $max_attempts 次)"
+            if cf restart "$app"; then
+              echo "应用 $app 重启成功。"
+              success=true
+              break
+            else
+              echo "应用 $app 重启失败。将在 1 分钟后重试..."
+              sleep 60
+            fi
+            ((attempt++))
+          done
+          
+          if [[ "$success" == "false" ]]; then
+            echo "应用 $app 在 $max_attempts 次尝试后仍重启失败。"
+            overall_success=false
+          fi
+        done
+
+        if [[ "$overall_success" == "false" ]]; then
+          echo "----------------------------------------"
+          echo "警告: US区域部分应用重启失败。"
+          exit 1
+        else
+          echo "----------------------------------------"
+          echo "成功: US区域所有应用均已成功触发重启。"
+        fi
+
+    - name: 验证最终应用状态
       run: |
-        echo "验证US区域应用状态..."
+        echo "验证US区域最终应用状态..."
         cf apps
