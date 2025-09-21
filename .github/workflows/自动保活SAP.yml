@@ -2,7 +2,7 @@ name: 自动保活 SAP
 
 on:
   schedule:
-    - cron: '55 23 * * *'      # UTC时间 23:55 启动，以确保在 00:00 前 runner 就绪
+    - cron: '0 23 * * *'      
   workflow_dispatch:          # 允许手动触发
 
 jobs:
@@ -11,6 +11,7 @@ jobs:
     name: 重启新加坡(SG)区域应用
     if: always()
     continue-on-error: true
+    timeout-minutes: 60 # 增加1小时的安全超时
 
     steps:
     - name: 检出代码
@@ -69,39 +70,24 @@ jobs:
         echo "发现应用列表:"
         echo "$apps"
         
-        overall_success=true
         for app in $apps; do
-          max_attempts=3
           attempt=1
-          success=false
-          while [[ $attempt -le $max_attempts ]]; do
+          while true; do
             echo "----------------------------------------"
-            echo "正在尝试重启应用: $app (第 $attempt / $max_attempts 次)"
+            echo "正在尝试重启应用: $app (第 $attempt 次)"
             if cf restart "$app"; then
               echo "应用 $app 重启成功。"
-              success=true
-              break
+              break # 成功则跳出循环
             else
               echo "应用 $app 重启失败。将在 1 分钟后重试..."
               sleep 60
             fi
             ((attempt++))
           done
-          
-          if [[ "$success" == "false" ]]; then
-            echo "应用 $app 在 $max_attempts 次尝试后仍重启失败。"
-            overall_success=false
-          fi
         done
 
-        if [[ "$overall_success" == "false" ]]; then
-          echo "----------------------------------------"
-          echo "警告: SG区域部分应用重启失败。"
-          exit 1
-        else
-          echo "----------------------------------------"
-          echo "成功: SG区域所有应用均已成功触发重启。"
-        fi
+        echo "----------------------------------------"
+        echo "成功: SG区域所有应用均已成功触发重启。"
 
     - name: 验证最终应用状态
       run: |
@@ -113,6 +99,7 @@ jobs:
     name: 重启美国(US)区域应用
     if: always()
     continue-on-error: true
+    timeout-minutes: 60 # 增加1小时的安全超时
 
     steps:
     - name: 检出代码
@@ -171,39 +158,24 @@ jobs:
         echo "发现应用列表:"
         echo "$apps"
 
-        overall_success=true
         for app in $apps; do
-          max_attempts=3
           attempt=1
-          success=false
-          while [[ $attempt -le $max_attempts ]]; do
+          while true; do
             echo "----------------------------------------"
-            echo "正在尝试重启应用: $app (第 $attempt / $max_attempts 次)"
+            echo "正在尝试重启应用: $app (第 $attempt 次)"
             if cf restart "$app"; then
               echo "应用 $app 重启成功。"
-              success=true
-              break
+              break # 成功则跳出循环
             else
               echo "应用 $app 重启失败。将在 1 分钟后重试..."
               sleep 60
             fi
             ((attempt++))
           done
-          
-          if [[ "$success" == "false" ]]; then
-            echo "应用 $app 在 $max_attempts 次尝试后仍重启失败。"
-            overall_success=false
-          fi
         done
 
-        if [[ "$overall_success" == "false" ]]; then
-          echo "----------------------------------------"
-          echo "警告: US区域部分应用重启失败。"
-          exit 1
-        else
-          echo "----------------------------------------"
-          echo "成功: US区域所有应用均已成功触发重启。"
-        fi
+        echo "----------------------------------------"
+        echo "成功: US区域所有应用均已成功触发重启。"
 
     - name: 验证最终应用状态
       run: |
