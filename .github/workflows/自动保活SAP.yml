@@ -2,7 +2,7 @@ name: 自动保活 SAP
 
 on:
   schedule:
-    - cron: '0 23 * * *'      
+    - cron: '45 23 * * *'      
   workflow_dispatch:          # 允许手动触发
 
 jobs:
@@ -47,15 +47,38 @@ jobs:
       run: |
         echo "等待 UTC 时间到达 00:00 以开始重启流程..."
         target_time="00:00"
+        deadline_time="01:00"
+
         while true; do
-          current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
-          if [ -z "$current_time" ]; then sleep 15; continue; fi
-          if [[ "$current_time" > "01:00" ]]; then echo "错误：已超过安全时间窗口。"; exit 1; fi
+          date_header=$(curl -sI https://www.ntp.org/ | grep -i '^date:')
+          if [ -z "$date_header" ]; then
+            echo "无法获取 ntp.org 时间，15秒后重试..."
+            sleep 15
+            continue
+          fi
+
+          current_time=$(echo "$date_header" | awk '{print $6}' | cut -c 1-5)
+          current_hour=$(echo "$current_time" | cut -c 1-2)
+          
+          # 跨天逻辑处理：如果当前是23点，说明还在午夜前，继续等待
+          if [[ "$current_hour" == "23" ]]; then
+            echo "等待午夜... 当前 UTC 时间: $current_time"
+            sleep 60
+            continue
+          fi
+
+          # 午夜后的逻辑
+          if [[ "$current_time" > "$deadline_time" ]]; then
+            echo "错误：已超过安全时间窗口 ($deadline_time UTC)。"
+            exit 1
+          fi
+
           if [[ "$current_time" > "$target_time" || "$current_time" == "$target_time" ]]; then
             echo "时间到达或超过 00:00 UTC (北京时间 08:00)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，将在 1 分钟后再次检查..."
+          
+          echo "时间未到 (当前 $current_time)，将在 1 分钟后再次检查..."
           sleep 60
         done
 
@@ -135,15 +158,38 @@ jobs:
       run: |
         echo "等待 UTC 时间到达 00:00 以开始重启流程..."
         target_time="00:00"
+        deadline_time="01:00"
+
         while true; do
-          current_time=$(curl -sI https://www.ntp.org/ | grep -i '^date:' | awk '{print $6}' | cut -c 1-5)
-          if [ -z "$current_time" ]; then sleep 15; continue; fi
-          if [[ "$current_time" > "01:00" ]]; then echo "错误：已超过安全时间窗口。"; exit 1; fi
+          date_header=$(curl -sI https://www.ntp.org/ | grep -i '^date:')
+          if [ -z "$date_header" ]; then
+            echo "无法获取 ntp.org 时间，15秒后重试..."
+            sleep 15
+            continue
+          fi
+
+          current_time=$(echo "$date_header" | awk '{print $6}' | cut -c 1-5)
+          current_hour=$(echo "$current_time" | cut -c 1-2)
+          
+          # 跨天逻辑处理：如果当前是23点，说明还在午夜前，继续等待
+          if [[ "$current_hour" == "23" ]]; then
+            echo "等待午夜... 当前 UTC 时间: $current_time"
+            sleep 60
+            continue
+          fi
+
+          # 午夜后的逻辑
+          if [[ "$current_time" > "$deadline_time" ]]; then
+            echo "错误：已超过安全时间窗口 ($deadline_time UTC)。"
+            exit 1
+          fi
+
           if [[ "$current_time" > "$target_time" || "$current_time" == "$target_time" ]]; then
             echo "时间到达或超过 00:00 UTC (北京时间 08:00)，开始执行重启任务。"
             break
           fi
-          echo "时间未到，将在 1 分钟后再次检查..."
+          
+          echo "时间未到 (当前 $current_time)，将在 1 分钟后再次检查..."
           sleep 60
         done
 
