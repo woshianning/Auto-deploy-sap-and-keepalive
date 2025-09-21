@@ -2,7 +2,7 @@ name: 自动保活 SAP
 
 on:
   schedule:
-    - cron: '17 00 * * *'      
+    - cron: '15 00 * * *'      #提前5分钟启动
   workflow_dispatch:          # 允许手动触发
 
 jobs:
