@@ -162,10 +162,19 @@ jobs:
         echo "环境变量设置完成。"
 
     - name: 启动应用以应用环境变量
+      id: start_app
       run: |
         echo "正在启动应用并应用所有环境变量..."
         cf start ${{ env.APP_NAME }}
 
+    - name: 启动失败时自动删除应用
+      if: failure() && steps.start_app.outcome == 'failure'
+      run: |
+        echo "应用 ${{ env.APP_NAME }} 启动失败。"
+        echo "妈的部署失败..."
+        cf delete ${{ env.APP_NAME }} -f -r
+        echo "应用 ${{ env.APP_NAME }} 已成功删除。"
+    
     - name: 详细部署信息
       run: |
         echo "----------------------------------------"
