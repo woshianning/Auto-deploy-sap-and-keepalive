@@ -1,4 +1,4 @@
-# 部署失败不要慌早说8点在部署
+# 部署失败不要慌早上8点在部署
 ### 前置要求
 * GitHub 账户：需要有一个 GitHub 账户来创建仓库和设置工作流
 * SAP Cloud Foundry 账户：需要有 SAP Cloud Foundry 的有效账户，点此注册：https://www.sap.com
