@@ -11,8 +11,7 @@ jobs:
     name: 重启新加坡(SG)区域应用
     if: always()
     continue-on-error: true
-    timeout-minutes: 60 # 增加1小时的安全超时
-
+    timeout-minutes: 120 
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
@@ -60,14 +59,12 @@ jobs:
           current_time=$(echo "$date_header" | awk '{print $6}' | cut -c 1-5)
           current_hour=$(echo "$current_time" | cut -c 1-2)
           
-          # 跨天逻辑处理：如果当前是23点，说明还在午夜前，继续等待
           if [[ "$current_hour" == "23" ]]; then
             echo "等待午夜... 当前 UTC 时间: $current_time"
             sleep 60
             continue
           fi
 
-          # 午夜后的逻辑
           if [[ "$current_time" > "$deadline_time" ]]; then
             echo "错误：已超过安全时间窗口 ($deadline_time UTC)。"
             exit 1
@@ -82,7 +79,7 @@ jobs:
           sleep 60
         done
 
-    - name: 尝试重启所有应用(直至成功)
+    - name: 等待应用自行停止后，再尝试启动(直至成功)
       run: |
         apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
         if [ -z "$apps" ]; then
@@ -94,15 +91,40 @@ jobs:
         echo "$apps"
         
         for app in $apps; do
+          echo "----------------------------------------"
+          echo "开始处理应用: $app"
+          
+          # 步骤 1: 等待应用自行停止
+          echo "等待应用 $app 自行停止..."
+          wait_timeout=3600 # 1小时的等待超时
+          elapsed=0
+          is_stopped=false
+          while [[ $elapsed -lt $wait_timeout ]]; do
+            if [[ "$(cf app "$app" | grep 'requested state:' | awk '{print $3}')" != "started" ]]; then
+              echo "应用 $app 已确认停止。"
+              is_stopped=true
+              break
+            fi
+            echo "应用 $app 仍在运行，15秒后再次检查..."
+            sleep 15
+            elapsed=$((elapsed + 15))
+          done
+
+          if [[ "$is_stopped" == "false" ]]; then
+            echo "错误: 等待应用 $app 自行停止超时 (1小时)。跳过此应用。"
+            continue
+          fi
+
+          # 步骤 2: 无限次尝试启动应用，直到成功
+          echo "开始启动应用: $app"
           attempt=1
           while true; do
-            echo "----------------------------------------"
-            echo "正在尝试重启应用: $app (第 $attempt 次)"
-            if cf restart "$app"; then
-              echo "应用 $app 重启成功。"
+            echo "正在进行第 $attempt 次启动尝试..."
+            if cf start "$app"; then
+              echo "应用 $app 成功启动。"
               break # 成功则跳出循环
             else
-              echo "应用 $app 重启失败。将在 1 分钟后重试..."
+              echo "启动失败。将在 1 分钟后重试..."
               sleep 60
             fi
             ((attempt++))
@@ -110,7 +132,7 @@ jobs:
         done
 
         echo "----------------------------------------"
-        echo "成功: SG区域所有应用均已成功触发重启。"
+        echo "成功: SG区域所有应用均已处理完毕。"
 
     - name: 验证最终应用状态
       run: |
@@ -122,7 +144,7 @@ jobs:
     name: 重启美国(US)区域应用
     if: always()
     continue-on-error: true
-    timeout-minutes: 60 # 增加1小时的安全超时
+    timeout-minutes: 120 # 整体超时延长至2小时，以容纳更长的等待时间
 
     steps:
     - name: 检出代码
@@ -171,14 +193,12 @@ jobs:
           current_time=$(echo "$date_header" | awk '{print $6}' | cut -c 1-5)
           current_hour=$(echo "$current_time" | cut -c 1-2)
           
-          # 跨天逻辑处理：如果当前是23点，说明还在午夜前，继续等待
           if [[ "$current_hour" == "23" ]]; then
             echo "等待午夜... 当前 UTC 时间: $current_time"
             sleep 60
             continue
           fi
 
-          # 午夜后的逻辑
           if [[ "$current_time" > "$deadline_time" ]]; then
             echo "错误：已超过安全时间窗口 ($deadline_time UTC)。"
             exit 1
@@ -193,7 +213,7 @@ jobs:
           sleep 60
         done
 
-    - name: 尝试重启所有应用(直至成功)
+    - name: 等待应用自行停止后，再尝试启动(直至成功)
       run: |
         apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
         if [ -z "$apps" ]; then
@@ -205,15 +225,38 @@ jobs:
         echo "$apps"
 
         for app in $apps; do
+          echo "----------------------------------------"
+          echo "开始处理应用: $app"
+          
+          echo "等待应用 $app 自行停止..."
+          wait_timeout=3600 # 1小时的等待超时
+          elapsed=0
+          is_stopped=false
+          while [[ $elapsed -lt $wait_timeout ]]; do
+            if [[ "$(cf app "$app" | grep 'requested state:' | awk '{print $3}')" != "started" ]]; then
+              echo "应用 $app 已确认停止。"
+              is_stopped=true
+              break
+            fi
+            echo "应用 $app 仍在运行，15秒后再次检查..."
+            sleep 15
+            elapsed=$((elapsed + 15))
+          done
+
+          if [[ "$is_stopped" == "false" ]]; then
+            echo "错误: 等待应用 $app 自行停止超时 (1小时)。跳过此应用。"
+            continue
+          fi
+
+          echo "开始启动应用: $app"
           attempt=1
           while true; do
-            echo "----------------------------------------"
-            echo "正在尝试重启应用: $app (第 $attempt 次)"
-            if cf restart "$app"; then
-              echo "应用 $app 重启成功。"
-              break # 成功则跳出循环
+            echo "正在进行第 $attempt 次启动尝试..."
+            if cf start "$app"; then
+              echo "应用 $app 成功启动。"
+              break
             else
-              echo "应用 $app 重启失败。将在 1 分钟后重试..."
+              echo "启动失败。将在 1 分钟后重试..."
               sleep 60
             fi
             ((attempt++))
@@ -221,7 +264,7 @@ jobs:
         done
 
         echo "----------------------------------------"
-        echo "成功: US区域所有应用均已成功触发重启。"
+        echo "成功: US区域所有应用均已处理完毕。"
 
     - name: 验证最终应用状态
       run: |
