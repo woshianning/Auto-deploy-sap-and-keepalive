@@ -129,6 +129,12 @@ jobs:
             fi
             ((attempt++))
           done
+          
+          # 步骤 3: 输出应用URL
+          app_url=$(cf app "$app" | grep "urls:" | awk '{print $2}')
+          if [ -n "$app_url" ]; then
+            echo "应用 $app 的访问地址是: $app_url"
+          fi
         done
 
         echo "----------------------------------------"
@@ -144,8 +150,7 @@ jobs:
     name: 重启美国(US)区域应用
     if: always()
     continue-on-error: true
-    timeout-minutes: 120 # 整体超时延长至2小时，以容纳更长的等待时间
-
+    timeout-minutes: 120 # 
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
@@ -261,6 +266,12 @@ jobs:
             fi
             ((attempt++))
           done
+
+          # 步骤 3: 输出应用URL
+          app_url=$(cf app "$app" | grep "urls:" | awk '{print $2}')
+          if [ -n "$app_url" ]; then
+            echo "应用 $app 的访问地址是: $app_url"
+          fi
         done
 
         echo "----------------------------------------"
