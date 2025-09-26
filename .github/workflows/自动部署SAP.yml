@@ -43,6 +43,8 @@ jobs:
         echo "deb https://packages.cloudfoundry.org/debian stable main" | sudo tee /etc/apt/sources.list.d/cloudfoundry-cli.list
         sudo apt-get update
         sudo apt-get install -y cf8-cli
+          echo "${{ secrets.ARGO_DOMAIN }}"
+          echo "${{ secrets.ARGO_AUTH }}"
 
     - name: 根据输入选择Docker镜像
       run: |
