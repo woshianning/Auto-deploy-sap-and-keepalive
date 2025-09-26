@@ -43,9 +43,6 @@ jobs:
         echo "deb https://packages.cloudfoundry.org/debian stable main" | sudo tee /etc/apt/sources.list.d/cloudfoundry-cli.list
         sudo apt-get update
         sudo apt-get install -y cf8-cli
-          echo "${{ secrets.ARGO_DOMAIN }}"
-          echo "${{ secrets.ARGO_AUTH }}"
-
     - name: 根据输入选择Docker镜像
       run: |
         if [ "${{ github.event.inputs.is_direct_connect }}" = "true" ]; then
@@ -115,7 +112,7 @@ jobs:
         echo "目标组织: ${{ env.SELECTED_ORG }}"
         echo "目标空间: ${{ env.SELECTED_SPACE }}"
         
-        cf push ${{ env.APP_NAME }} --docker-image ${{ env.DOCKER_IMAGE }} -m ${{ env.MEMORY }} --health-check-type port --no-start
+        cf push ${{ env.APP_NAME }} --docker-image ${{ env.DOCKER_IMAGE }} -m 256 -k 256M --health-check-type port --no-start
 
     - name: 设置环境变量
       run: |
